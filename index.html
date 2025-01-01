@@ -46,36 +46,47 @@
     ctx.lineCap = 'round'; // Round edges for smoother lines
     ctx.strokeStyle = 'black'; // Line color
 
+    // Utility: Get cursor position
+    function getPosition(event) {
+      const rect = canvas.getBoundingClientRect();
+      if (event.touches) {
+        return {
+          x: event.touches[0].clientX - rect.left,
+          y: event.touches[0].clientY - rect.top
+        };
+      }
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+    }
+
     // Start drawing
-    canvas.addEventListener('mousedown', (event) => {
+    function startDrawing(event) {
       isDrawing = true;
       currentPath = [];
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const { x, y } = getPosition(event);
       currentPath.push({ x, y });
       ctx.beginPath();
       ctx.moveTo(x, y);
-    });
+    }
 
-    // Draw while the mouse is moving
-    canvas.addEventListener('mousemove', (event) => {
+    // Draw
+    function draw(event) {
       if (!isDrawing) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const { x, y } = getPosition(event);
       currentPath.push({ x, y });
       ctx.lineTo(x, y);
       ctx.stroke();
-    });
+    }
 
-    // End drawing
-    canvas.addEventListener('mouseup', () => {
+    // Stop drawing
+    function stopDrawing() {
       if (isDrawing) {
         paths.push(currentPath);
         isDrawing = false;
       }
-    });
+    }
 
     // Clear the canvas and reset paths
     document.getElementById('clearButton').addEventListener('click', () => {
@@ -138,6 +149,22 @@
 
       URL.revokeObjectURL(url); // Clean up
     });
+
+    // Add event listeners for both mouse and touch
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseleave', stopDrawing);
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      startDrawing(e);
+    });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      draw(e);
+    });
+    canvas.addEventListener('touchend', stopDrawing);
   </script>
 </body>
 </html>
