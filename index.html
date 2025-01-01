@@ -1,170 +1,102 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Write and Download G-code</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 20px;
+// Additional data for tracking time
+let lastPoint = null;
+let lastTime = null;
+
+// Updated getPosition function to include timestamp
+function getPosition(event) {
+  const rect = canvas.getBoundingClientRect();
+  const timestamp = event.timeStamp; // Event timestamp
+  if (event.touches) {
+    return {
+      x: event.touches[0].clientX - rect.left,
+      y: event.touches[0].clientY - rect.top,
+      time: timestamp,
+    };
+  }
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+    time: timestamp,
+  };
+}
+
+// Start drawing with updated tracking
+function startDrawing(event) {
+  isDrawing = true;
+  currentPath = [];
+  const position = getPosition(event);
+  currentPath.push(position);
+  lastPoint = position;
+  lastTime = position.time;
+  ctx.beginPath();
+  ctx.moveTo(position.x, position.y);
+}
+
+// Draw and calculate speed
+function draw(event) {
+  if (!isDrawing) return;
+
+  const position = getPosition(event);
+  const dx = position.x - lastPoint.x;
+  const dy = position.y - lastPoint.y;
+  const dt = position.time - lastTime;
+
+  const distance = Math.sqrt(dx ** 2 + dy ** 2);
+  const speed = dt > 0 ? (distance / dt) * 1000 : 0; // Speed in pixels/second
+
+  // Add position and speed to current path
+  currentPath.push({ x: position.x, y: position.y, speed });
+  ctx.lineTo(position.x, position.y);
+  ctx.stroke();
+
+  lastPoint = position;
+  lastTime = position.time;
+}
+
+// Stop drawing
+function stopDrawing() {
+  if (isDrawing) {
+    paths.push(currentPath);
+    isDrawing = false;
+  }
+}
+
+// Convert strokes to G-code with speed
+function strokesToGCode(strokes, maxFeedrate = 1200, liftHeight = 5) {
+  let gcode = [
+    "G21 ; Set units to mm",
+    "G90 ; Absolute positioning",
+  ];
+
+  const scale = 0.264583; // Convert pixels to mm (96 DPI)
+
+  for (const stroke of strokes) {
+    if (stroke.length === 0) continue;
+
+    // Lift the tool
+    gcode.push(`G0 Z${liftHeight}`);
+
+    // Move to the starting point of the stroke
+    const start = stroke[0];
+    gcode.push(`G0 X${(start.x * scale).toFixed(2)} Y${(start.y * scale).toFixed(2)}`);
+
+    // Lower the tool
+    gcode.push("G0 Z0");
+
+    // Draw the stroke with variable speed
+    for (let i = 1; i < stroke.length; i++) {
+      const point = stroke[i];
+      const speed = point.speed || 1; // Default speed if not calculated
+      const feedrate = Math.min(maxFeedrate, Math.max(100, speed * 10)); // Scale speed to feedrate
+
+      gcode.push(
+        `G1 X${(point.x * scale).toFixed(2)} Y${(point.y * scale).toFixed(2)} F${feedrate.toFixed(0)}`
+      );
     }
-    canvas {
-      border: 1px solid black;
-      cursor: crosshair;
-      background: #fff;
-    }
-    button {
-      margin: 10px;
-      padding: 10px 20px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-  <h1>Write on the Canvas</h1>
-  <p>Draw below and download the G-code file.</p>
-  <!-- A5 size in pixels: 210mm x 297mm at 96 DPI -->
-  <canvas id="drawingCanvas" width="794" height="1123"></canvas>
-  <div>
-    <button id="clearButton">Clear</button>
-    <button id="downloadButton">Download G-code</button>
-  </div>
+  }
 
-  <script>
-    const canvas = document.getElementById('drawingCanvas');
-    const ctx = canvas.getContext('2d');
+  // Final lift
+  gcode.push(`G0 Z${liftHeight}`);
 
-    let isDrawing = false;
-    let paths = []; // Stores all strokes
-    let currentPath = []; // Stores the current stroke
-
-    // Set up canvas context styles
-    ctx.lineWidth = 2; // Line thickness
-    ctx.lineCap = 'round'; // Round edges for smoother lines
-    ctx.strokeStyle = 'black'; // Line color
-
-    // Utility: Get cursor position
-    function getPosition(event) {
-      const rect = canvas.getBoundingClientRect();
-      if (event.touches) {
-        return {
-          x: event.touches[0].clientX - rect.left,
-          y: event.touches[0].clientY - rect.top
-        };
-      }
-      return {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
-      };
-    }
-
-    // Start drawing
-    function startDrawing(event) {
-      isDrawing = true;
-      currentPath = [];
-      const { x, y } = getPosition(event);
-      currentPath.push({ x, y });
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    }
-
-    // Draw
-    function draw(event) {
-      if (!isDrawing) return;
-      const { x, y } = getPosition(event);
-      currentPath.push({ x, y });
-      ctx.lineTo(x, y);
-      ctx.stroke();
-    }
-
-    // Stop drawing
-    function stopDrawing() {
-      if (isDrawing) {
-        paths.push(currentPath);
-        isDrawing = false;
-      }
-    }
-
-    // Clear the canvas and reset paths
-    document.getElementById('clearButton').addEventListener('click', () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      paths = [];
-    });
-
-    // Convert strokes to G-code
-    function strokesToGCode(strokes, feedrate = 1200, liftHeight = 5) {
-      let gcode = [
-        "G21 ; Set units to mm",
-        "G90 ; Absolute positioning",
-      ];
-
-      const scale = 0.264583; // Convert pixels to mm (96 DPI)
-
-      for (const stroke of strokes) {
-        if (stroke.length === 0) continue;
-
-        // Lift the tool
-        gcode.push(`G0 Z${liftHeight}`);
-
-        // Move to the starting point of the stroke
-        const start = stroke[0];
-        gcode.push(`G0 X${(start.x * scale).toFixed(2)} Y${(start.y * scale).toFixed(2)}`);
-
-        // Lower the tool
-        gcode.push("G0 Z0");
-
-        // Draw the stroke
-        for (const point of stroke) {
-          gcode.push(`G1 X${(point.x * scale).toFixed(2)} Y${(point.y * scale).toFixed(2)} F${feedrate}`);
-        }
-      }
-
-      // Final lift
-      gcode.push(`G0 Z${liftHeight}`);
-
-      return gcode.join("\n");
-    }
-
-    // Download G-code
-    document.getElementById('downloadButton').addEventListener('click', () => {
-      if (paths.length === 0) {
-        alert('Please draw something before downloading.');
-        return;
-      }
-
-      const gcode = strokesToGCode(paths);
-
-      // Create a downloadable blob
-      const blob = new Blob([gcode], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-
-      // Trigger file download
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'drawing.gcode';
-      a.click();
-
-      URL.revokeObjectURL(url); // Clean up
-    });
-
-    // Add event listeners for both mouse and touch
-    canvas.addEventListener('mousedown', startDrawing);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseleave', stopDrawing);
-
-    canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault(); // Prevent scrolling
-      startDrawing(e);
-    });
-    canvas.addEventListener('touchmove', (e) => {
-      e.preventDefault(); // Prevent scrolling
-      draw(e);
-    });
-    canvas.addEventListener('touchend', stopDrawing);
-  </script>
-</body>
-</html>
+  return gcode.join("\n");
+}
