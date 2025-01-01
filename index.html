@@ -1,38 +1,166 @@
-let isErasing = false;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Write and Download G-code</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 20px;
+    }
+    canvas {
+      border: 1px solid black;
+      cursor: crosshair;
+      background: #fff;
+    }
+    button {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Write on the Canvas</h1>
+  <p>Draw below and download the G-code file.</p>
+  <!-- A5 size in pixels: 210mm x 297mm at 96 DPI -->
+  <canvas id="drawingCanvas" width="794" height="1123"></canvas>
+  <div>
+    <button id="clearButton">Clear</button>
+    <button id="undoButton">Undo</button>
+    <button id="eraserButton">Eraser</button>
+    <button id="drawButton">Draw</button>
+    <button id="downloadButton">Download G-code</button>
+  </div>
 
-// Switch to eraser mode
-document.getElementById('eraserButton').addEventListener('click', () => {
-  isErasing = true;
-  ctx.strokeStyle = 'white'; // Set eraser color
-  ctx.lineWidth = 20; // Set eraser size (thicker stroke)
-});
+  <script>
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
 
-// Switch to drawing mode
-document.getElementById('drawButton').addEventListener('click', () => {
-  isErasing = false;
-  ctx.strokeStyle = 'black'; // Set drawing color
-  ctx.lineWidth = 2; // Reset stroke size
-});
+    let isDrawing = false;
+    let paths = [];
+    let currentPath = [];
+    let lastPoint = null;
+    let lastTime = null;
+    let isErasing = false;
 
-// Update draw function to support erasing
-function draw(event) {
-  if (!isDrawing) return;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'black';
 
-  const position = getPosition(event);
-  if (!isErasing) {
-    // Normal drawing
-    const dx = position.x - lastPoint.x;
-    const dy = position.y - lastPoint.y;
-    const dt = position.time - lastTime;
-    const distance = Math.sqrt(dx ** 2 + dy ** 2);
-    const speed = dt > 0 ? (distance / dt) * 1000 : 0;
+    function getPosition(event) {
+      const rect = canvas.getBoundingClientRect();
+      const timestamp = event.timeStamp;
+      if (event.touches) {
+        return {
+          x: event.touches[0].clientX - rect.left,
+          y: event.touches[0].clientY - rect.top,
+          time: timestamp,
+        };
+      }
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        time: timestamp,
+      };
+    }
 
-    currentPath.push({ x: position.x, y: position.y, speed });
-  }
+    function startDrawing(event) {
+      isDrawing = true;
+      currentPath = [];
+      const position = getPosition(event);
+      currentPath.push(position);
+      lastPoint = position;
+      lastTime = position.time;
+      ctx.beginPath();
+      ctx.moveTo(position.x, position.y);
+    }
 
-  ctx.lineTo(position.x, position.y);
-  ctx.stroke();
+    function draw(event) {
+      if (!isDrawing) return;
 
-  lastPoint = position;
-  lastTime = position.time;
-}
+      const position = getPosition(event);
+      if (!isErasing) {
+        const dx = position.x - lastPoint.x;
+        const dy = position.y - lastPoint.y;
+        const dt = position.time - lastTime;
+        const distance = Math.sqrt(dx ** 2 + dy ** 2);
+        const speed = dt > 0 ? (distance / dt) * 1000 : 0;
+        currentPath.push({ x: position.x, y: position.y, speed });
+      }
+
+      ctx.lineTo(position.x, position.y);
+      ctx.stroke();
+
+      lastPoint = position;
+      lastTime = position.time;
+    }
+
+    function stopDrawing() {
+      if (isDrawing) {
+        if (!isErasing) paths.push(currentPath);
+        isDrawing = false;
+      }
+    }
+
+    function redrawCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const path of paths) {
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i++) {
+          const point = path[i];
+          if (i === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+
+    document.getElementById('clearButton').addEventListener('click', () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      paths = [];
+    });
+
+    document.getElementById('undoButton').addEventListener('click', () => {
+      if (paths.length > 0) {
+        paths.pop();
+        redrawCanvas();
+      } else {
+        alert("Nothing to undo!");
+      }
+    });
+
+    document.getElementById('eraserButton').addEventListener('click', () => {
+      isErasing = true;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 20;
+    });
+
+    document.getElementById('drawButton').addEventListener('click', () => {
+      isErasing = false;
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 2;
+    });
+
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseleave', stopDrawing);
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      startDrawing(e);
+    });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      draw(e);
+    });
+    canvas.addEventListener('touchend', stopDrawing);
+  </script>
+</body>
+</html>
